@@ -23,7 +23,8 @@ plugins {
     val kotlinVersion = "1.9.25"
     id("org.jetbrains.kotlin.jvm") version kotlinVersion
     id("org.jetbrains.kotlin.plugin.jpa") version kotlinVersion
-    id("org.jetbrains.kotlin.plugin.spring") version kotlinVersion
+    id("org.jetbrains.kotlin.plugin.spring") version kotlinVersion{{#kotlinx_serialization}}
+    id("org.jetbrains.kotlin.plugin.serialization") version kotlinVersion{{/kotlinx_serialization}}
     id("org.springframework.boot") version "3.3.13"
     id("io.spring.dependency-management") version "1.1.7"
 }
@@ -31,7 +32,8 @@ plugins {
 dependencies {
 {{#reactive}}    val kotlinxCoroutinesVersion = "1.6.1"
 {{/reactive}}    implementation("org.jetbrains.kotlin:kotlin-stdlib-jdk8")
-    implementation("org.jetbrains.kotlin:kotlin-reflect"){{^reactive}}
+    implementation("org.jetbrains.kotlin:kotlin-reflect"){{#kotlinx_serialization}}
+    implementation("org.jetbrains.kotlinx:kotlinx-serialization-json"){{/kotlinx_serialization}}{{^reactive}}
         implementation("org.springframework.boot:spring-boot-starter-web"){{/reactive}}{{#reactive}}
         implementation("org.springframework.boot:spring-boot-starter-webflux")
         implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:$kotlinxCoroutinesVersion")

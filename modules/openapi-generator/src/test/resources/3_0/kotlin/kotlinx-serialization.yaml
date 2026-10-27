@@ -1,0 +1,130 @@
+openapi: 3.0.3
+info: {title: kotlinx serialization, version: "1.0"}
+paths:
+  /pets:
+    post:
+      operationId: createPet
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Pet'}
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Pet'}
+  /shapes:
+    post:
+      operationId: echoShape
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Shape'}
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema:
+                type: array
+                items: {$ref: '#/components/schemas/Shape'}
+  /things:
+    post:
+      operationId: echoThing
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: {$ref: '#/components/schemas/Thing'}
+      responses:
+        '200':
+          description: ok
+          content:
+            application/json:
+              schema: {$ref: '#/components/schemas/Thing'}
+components:
+  schemas:
+    Pet:
+      type: object
+      required: [petType, name]
+      discriminator:
+        propertyName: petType
+        mapping:
+          dog: '#/components/schemas/Dog'
+          cat: '#/components/schemas/Cat'
+      properties:
+        petType: {type: string}
+        name: {type: string}
+    Dog:
+      allOf:
+        - $ref: '#/components/schemas/Pet'
+        - type: object
+          properties:
+            bark: {type: boolean}
+    Cat:
+      allOf:
+        - $ref: '#/components/schemas/Pet'
+        - type: object
+          properties:
+            lives: {type: integer, default: 9}
+    Shape:
+      oneOf:
+        - $ref: '#/components/schemas/Circle'
+        - $ref: '#/components/schemas/Square'
+      discriminator:
+        propertyName: kind
+        mapping:
+          circle: '#/components/schemas/Circle'
+          square: '#/components/schemas/Square'
+    Circle:
+      type: object
+      required: [kind, radius]
+      properties:
+        kind: {type: string}
+        radius: {type: number}
+    Square:
+      type: object
+      required: [kind, side]
+      properties:
+        kind: {type: string}
+        side: {type: number, format: double}
+    Color:
+      type: string
+      enum: [red, green, "dark-blue"]
+    Level:
+      type: integer
+      enum: [1, 2, 3]
+    Thing:
+      type: object
+      required: [id, created_at]
+      properties:
+        id: {type: string, format: uuid}
+        created_at: {type: string, format: date-time}
+        day: {type: string, format: date}
+        price: {type: number}
+        big: {type: integer, format: int64}
+        link: {type: string, format: uri}
+        color: {$ref: '#/components/schemas/Color'}
+        level: {$ref: '#/components/schemas/Level'}
+        status:
+          type: string
+          enum: [new, "in progress", done]
+        tags:
+          type: array
+          items:
+            type: string
+            enum: [a, b]
+        ids:
+          type: array
+          items: {type: string, format: uuid}
+        meta:
+          type: object
+          additionalProperties: {type: string, format: date-time}
+        free: {type: object}
+        anything: {}
+        "$special": {type: string}
+        withDefault: {type: string, default: "hello"}
+        nullableField: {type: string, nullable: true}

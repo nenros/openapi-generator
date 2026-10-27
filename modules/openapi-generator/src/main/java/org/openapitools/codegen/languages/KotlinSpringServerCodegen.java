@@ -119,6 +119,7 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
     public static final String USE_SEALED_DISCRIMINATOR_INTERFACES = "useSealedDiscriminatorInterfaces";
     public static final String COMPANION_OBJECT = "companionObject";
     public static final String SUSPEND_FUNCTIONS = "suspendFunctions";
+    public static final String KOTLINX_SERIALIZATION = "kotlinx_serialization";
 
     @Getter
     public enum DeclarativeInterfaceReactiveMode {
@@ -131,6 +132,17 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
         DeclarativeInterfaceReactiveMode(String description, String additionalPropertyName) {
             this.description = description;
             this.additionalPropertyName = additionalPropertyName;
+        }
+    }
+
+    public enum SerializationLibrary {
+        jackson("Use Jackson as serialization library (default)."),
+        kotlinx_serialization("Use kotlinx.serialization as serialization library. Only available with the `spring-boot` library and `useSpringBoot3` or `useSpringBoot4`.");
+
+        @Getter private final String description;
+
+        SerializationLibrary(String description) {
+            this.description = description;
         }
     }
 
@@ -213,6 +225,7 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
     @Getter @Setter private TriStateBoolean generateJsonIncludeAnnotations = TriStateBoolean.UNSET;
     @Getter @Setter private TriStateBoolean generateJsonSetterNullsAnnotations = TriStateBoolean.UNSET;
     @Getter @Setter private boolean openApiNullable = false;
+    @Getter @Setter private SerializationLibrary serializationLibrary = SerializationLibrary.jackson;
     @Getter @Setter
     protected boolean useDeductionForOneOfInterfaces = false;
 
@@ -363,6 +376,14 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
                 substituteGenericPagedModel);
         addSwitch(COMPANION_OBJECT, "Whether to generate companion objects in data classes, enabling companion extensions.", companionObject);
         addSwitch(SUSPEND_FUNCTIONS, "Whether to generate suspend functions for API operations. Useful for Spring MVC with Kotlin coroutines without requiring the full reactive stack.", suspendFunctions);
+
+        CliOption serializationLibraryOpt = CliOption.newString(CodegenConstants.SERIALIZATION_LIBRARY,
+                "What serialization library to use for the models and the HTTP message conversion.");
+        for (SerializationLibrary lib : SerializationLibrary.values()) {
+            serializationLibraryOpt.addEnum(lib.name(), lib.getDescription());
+        }
+        serializationLibraryOpt.setDefault(serializationLibrary.name());
+        cliOptions.add(serializationLibraryOpt);
 
         CliOption optionalNonNullPropertyJsonIncludeOpt = CliOption.newString(CodegenConstants.OPTIONAL_NON_NULL_PROPERTY_JSON_INCLUDE,
                 JsonAnnotationPolicyUtils.OPTIONAL_NON_NULL_PROPERTY_JSON_INCLUDE_DESC);
@@ -841,6 +862,17 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
         }
         writePropertyBack(SUSPEND_FUNCTIONS, suspendFunctions);
 
+        if (additionalProperties.containsKey(CodegenConstants.SERIALIZATION_LIBRARY)) {
+            String value = additionalProperties.get(CodegenConstants.SERIALIZATION_LIBRARY).toString();
+            try {
+                this.setSerializationLibrary(SerializationLibrary.valueOf(value));
+            } catch (IllegalArgumentException e) {
+                throw new IllegalArgumentException("Unsupported serializationLibrary '" + value + "'. Supported values: "
+                        + Arrays.toString(SerializationLibrary.values()), e);
+            }
+        }
+        writePropertyBack(CodegenConstants.SERIALIZATION_LIBRARY, serializationLibrary.name());
+
         if (additionalProperties.containsKey(CodegenConstants.GENERATE_JSON_INCLUDE_ANNOTATIONS)) {
             this.generateJsonIncludeAnnotations = TriStateBoolean.fromNullableBoolean(convertPropertyToBoolean(CodegenConstants.GENERATE_JSON_INCLUDE_ANNOTATIONS));
         }
@@ -857,9 +889,11 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
         if (optionalNonNullPropertyJsonSetterNulls != null) {
             writePropertyBack(CodegenConstants.OPTIONAL_NON_NULL_PROPERTY_JSON_SETTER_NULLS, optionalNonNullPropertyJsonSetterNulls.name());
         }
-        JsonAnnotationPolicyUtils.warnIfUnset(LOGGER, generateJsonIncludeAnnotations, generateJsonSetterNullsAnnotations);
-        JsonAnnotationPolicyUtils.warnIfJsonSetterNullsDefaultRisky(LOGGER, generateJsonSetterNullsAnnotations,
-                optionalNonNullPropertyJsonSetterNulls, openApiNullable, true);
+        if (!isKotlinxSerialization()) {
+            JsonAnnotationPolicyUtils.warnIfUnset(LOGGER, generateJsonIncludeAnnotations, generateJsonSetterNullsAnnotations);
+            JsonAnnotationPolicyUtils.warnIfJsonSetterNullsDefaultRisky(LOGGER, generateJsonSetterNullsAnnotations,
+                    optionalNonNullPropertyJsonSetterNulls, openApiNullable, true);
+        }
 
         if (additionalProperties.containsKey(BEAN_QUALIFIERS) && library.equals(SPRING_BOOT)) {
             this.setBeanQualifiers(convertPropertyToBoolean(BEAN_QUALIFIERS));
@@ -934,6 +968,9 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
 
         if (additionalProperties.containsKey(CodegenConstants.OPENAPI_NULLABLE)) {
             this.setOpenApiNullable(convertPropertyToBoolean(CodegenConstants.OPENAPI_NULLABLE));
+        }
+        if (isKotlinxSerialization()) {
+            configureKotlinxSerialization();
         }
         writePropertyBack(CodegenConstants.OPENAPI_NULLABLE, openApiNullable);
 
@@ -1129,14 +1166,63 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
                 break;
         }
 
-        // spring uses the jackson lib, and we disallow configuration.
-        additionalProperties.put("jackson", "true");
+        if (isKotlinxSerialization()) {
+            additionalProperties.put(KOTLINX_SERIALIZATION, "true");
+            if (library.equals(SPRING_BOOT)) {
+                String modelFolder = sanitizeDirectory(sourceFolder + File.separator + modelPackage);
+                supportingFiles.add(new SupportingFile("kotlinxSerializers.mustache", modelFolder, "Serializers.kt"));
+                supportingFiles.add(new SupportingFile("kotlinxSerializationConfiguration.mustache",
+                        sanitizeDirectory(sourceFolder + File.separator + basePackage), "KotlinxSerializationConfiguration.kt"));
+            }
+        } else {
+            // spring uses the jackson lib by default
+            additionalProperties.put("jackson", "true");
+        }
 
         // add lambda for mustache templates
         additionalProperties.put("lambdaEscapeInNormalString",
                 (Mustache.Lambda) (fragment, writer) -> writer.write(fragment.execute().replaceAll("([$\"\\\\])", "\\\\$1")));
         additionalProperties.put("lambdaRemoveLineBreak",
                 (Mustache.Lambda) (fragment, writer) -> writer.write(fragment.execute().replaceAll("[\\r\\n]", "")));
+    }
+
+    public boolean isKotlinxSerialization() {
+        return serializationLibrary == SerializationLibrary.kotlinx_serialization;
+    }
+
+    /**
+     * Validates the options that are incompatible with kotlinx.serialization and switches off the
+     * Jackson-only features. Called from {@link #processOpts()} once all related options are resolved.
+     */
+    private void configureKotlinxSerialization() {
+        if (!SPRING_BOOT.equals(library)) {
+            throw new IllegalArgumentException("serializationLibrary=kotlinx_serialization is only supported with the `"
+                    + SPRING_BOOT + "` library");
+        }
+        if (!isUseSpringBoot3() && !isUseSpringBoot4()) {
+            throw new IllegalArgumentException("serializationLibrary=kotlinx_serialization requires `useSpringBoot3` or `useSpringBoot4`");
+        }
+        if (useSealedResponseInterfaces) {
+            throw new IllegalArgumentException("useSealedResponseInterfaces is not supported with serializationLibrary=kotlinx_serialization");
+        }
+        if (openApiNullable) {
+            LOGGER.warn("openApiNullable (JsonNullable) is a Jackson feature and is ignored with serializationLibrary=kotlinx_serialization");
+            openApiNullable = false;
+        }
+        if (!useSealedDiscriminatorInterfaces) {
+            LOGGER.warn("kotlinx.serialization only supports closed polymorphism, forcing useSealedDiscriminatorInterfaces=true");
+            useSealedDiscriminatorInterfaces = true;
+            additionalProperties.put(USE_SEALED_DISCRIMINATOR_INTERFACES, true);
+        }
+        generateJsonIncludeAnnotations = TriStateBoolean.FALSE;
+        generateJsonSetterNullsAnnotations = TriStateBoolean.FALSE;
+        additionalProperties.put(CodegenConstants.GENERATE_JSON_INCLUDE_ANNOTATIONS, false);
+        additionalProperties.put(CodegenConstants.GENERATE_JSON_SETTER_NULLS_ANNOTATIONS, false);
+
+        // kotlin.Any has no serializer, free-form values are represented as JSON trees instead
+        typeMapping.put("object", "JsonElement");
+        typeMapping.put("AnyType", "JsonElement");
+        importMapping.put("JsonElement", "kotlinx.serialization.json.JsonElement");
     }
 
     @Override
@@ -1633,6 +1719,10 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
             }
         }
 
+        if (isKotlinxSerialization()) {
+            postProcessKotlinxDiscriminators(allModelsMap);
+        }
+
         // Multi-level allOf inheritance: detect "mid-level" models — models that (a) have at least
         // one child via allOf and (b) are themselves a child (have a parent) but are NOT a
         // discriminator root. A data class cannot be subclassed, so these must become `open class`
@@ -1737,7 +1827,57 @@ public class KotlinSpringServerCodegen extends AbstractKotlinCodegen
             }
         }
 
+        if (isKotlinxSerialization()) {
+            // Jackson imports are added unconditionally while processing models and properties,
+            // drop them so the generated models do not depend on Jackson.
+            for (ModelsMap modelsMap : objs.values()) {
+                List<Map<String, String>> imports = modelsMap.getImports();
+                if (imports != null) {
+                    imports.removeIf(i -> isJacksonImport(i.get("import")));
+                }
+            }
+        }
+
         return objs;
+    }
+
+    private static boolean isJacksonImport(String fqn) {
+        return fqn != null && (fqn.startsWith("com.fasterxml.jackson.")
+                || fqn.startsWith(JACKSON3_PACKAGE + ".")
+                || fqn.startsWith("org.openapitools.jackson."));
+    }
+
+    /**
+     * kotlinx.serialization writes the class discriminator itself (see {@code @JsonClassDiscriminator}), and
+     * rejects subclasses declaring a serializable property with the same name. The discriminator property of
+     * every subtype is therefore marked {@code @Transient} (defaulting to its mapping value) and each subtype
+     * gets its mapping value as {@code @SerialName}.
+     */
+    private void postProcessKotlinxDiscriminators(Map<String, CodegenModel> allModelsMap) {
+        Set<String> processedChildren = new HashSet<>();
+        for (CodegenModel cm : allModelsMap.values()) {
+            if (cm.discriminator == null) {
+                if (Boolean.TRUE.equals(cm.vendorExtensions.get(CodegenConstants.X_IS_ONE_OF_INTERFACE))) {
+                    LOGGER.warn("oneOf schema '{}' has no discriminator: kotlinx.serialization cannot deserialize it "
+                            + "without a custom serializer", cm.name);
+                }
+                continue;
+            }
+            String discrimBaseName = cm.discriminator.getPropertyBaseName();
+            for (CodegenDiscriminator.MappedModel mm : cm.discriminator.getMappedModels()) {
+                CodegenModel child = allModelsMap.get(mm.getModelName());
+                if (child == null || child == cm || !processedChildren.add(child.name)) {
+                    continue;
+                }
+                child.vendorExtensions.put("x-kotlinx-serial-name", mm.getMappingName());
+                markPropertyAsInherited(child, discrimBaseName, cm.discriminator.getPropertyType(),
+                        mm.getMappingName(), cm.discriminator.getIsEnum());
+                Stream.of(child.vars, child.requiredVars, child.optionalVars, child.allVars)
+                        .flatMap(List::stream)
+                        .filter(p -> discrimBaseName.equals(p.baseName))
+                        .forEach(p -> p.vendorExtensions.put("x-kotlinx-transient", true));
+            }
+        }
     }
 
     /**

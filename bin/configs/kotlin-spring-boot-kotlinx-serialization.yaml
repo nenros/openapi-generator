@@ -1,0 +1,12 @@
+generatorName: kotlin-spring
+outputDir: samples/server/others/kotlin-springboot/kotlinx-serialization
+library: spring-boot
+inputSpec: modules/openapi-generator/src/test/resources/3_0/kotlin/kotlinx-serialization.yaml
+templateDir: modules/openapi-generator/src/main/resources/kotlin-spring
+additionalProperties:
+  serializationLibrary: kotlinx_serialization
+  documentationProvider: none
+  annotationLibrary: none
+  useSwaggerUI: "false"
+  useBeanValidation: "true"
+  useSpringBoot3: "true"

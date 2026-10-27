@@ -1,0 +1,138 @@
+package {{modelPackage}}
+
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerializationException
+import kotlinx.serialization.descriptors.PrimitiveKind
+import kotlinx.serialization.descriptors.PrimitiveSerialDescriptor
+import kotlinx.serialization.descriptors.SerialDescriptor
+import kotlinx.serialization.encoding.Decoder
+import kotlinx.serialization.encoding.Encoder
+import kotlinx.serialization.json.JsonDecoder
+import kotlinx.serialization.json.JsonEncoder
+import kotlinx.serialization.json.JsonUnquotedLiteral
+import kotlinx.serialization.json.jsonPrimitive
+import java.math.BigDecimal
+import java.math.BigInteger
+import java.net.URI
+import java.net.URL
+import java.time.Instant
+import java.time.LocalDate
+import java.time.LocalDateTime
+import java.time.LocalTime
+import java.time.OffsetDateTime
+import java.time.format.DateTimeFormatter
+import java.util.UUID
+
+/**
+ * kotlinx.serialization serializers for the JDK types used by the generated models.
+ * They are registered in every model file with `@file:UseSerializers`.
+ */
+abstract class StringRepresentationSerializer<T : Any>(
+    serialName: String,
+    private val toText: (T) -> String,
+    private val fromText: (String) -> T
+) : KSerializer<T> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(serialName, PrimitiveKind.STRING)
+
+    override fun serialize(encoder: Encoder, value: T) = encoder.encodeString(toText(value))
+
+    override fun deserialize(decoder: Decoder): T {
+        val text = decoder.decodeString()
+        return try {
+            fromText(text)
+        } catch (e: RuntimeException) {
+            throw SerializationException("Cannot deserialize '$text' as ${descriptor.serialName}", e)
+        }
+    }
+}
+
+/**
+ * Serializes numbers as JSON number literals, keeping their full precision.
+ */
+abstract class NumberLiteralSerializer<T : Number>(
+    serialName: String,
+    private val fromText: (String) -> T
+) : KSerializer<T> {
+    override val descriptor: SerialDescriptor = PrimitiveSerialDescriptor(serialName, PrimitiveKind.DOUBLE)
+
+    @OptIn(ExperimentalSerializationApi::class)
+    override fun serialize(encoder: Encoder, value: T) {
+        val text = if (value is BigDecimal) value.toPlainString() else value.toString()
+        if (encoder is JsonEncoder) {
+            encoder.encodeJsonElement(JsonUnquotedLiteral(text))
+        } else {
+            encoder.encodeString(text)
+        }
+    }
+
+    override fun deserialize(decoder: Decoder): T {
+        val text = if (decoder is JsonDecoder) decoder.decodeJsonElement().jsonPrimitive.content else decoder.decodeString()
+        return try {
+            fromText(text)
+        } catch (e: NumberFormatException) {
+            throw SerializationException("Cannot deserialize '$text' as ${descriptor.serialName}", e)
+        }
+    }
+}
+
+/**
+ * Serializes an enum as its OpenAPI value instead of its constant name.
+ */
+abstract class EnumValueSerializer<E : Enum<E>, V>(
+    serialName: String,
+    private val valueSerializer: KSerializer<V>,
+    private val toValue: (E) -> V,
+    private val fromValue: (V) -> E
+) : KSerializer<E> {
+    override val descriptor: SerialDescriptor =
+        PrimitiveSerialDescriptor(serialName, valueSerializer.descriptor.kind as PrimitiveKind)
+
+    override fun serialize(encoder: Encoder, value: E) =
+        encoder.encodeSerializableValue(valueSerializer, toValue(value))
+
+    override fun deserialize(decoder: Decoder): E {
+        val value = decoder.decodeSerializableValue(valueSerializer)
+        return try {
+            fromValue(value)
+        } catch (e: IllegalArgumentException) {
+            throw SerializationException(e.message, e)
+        }
+    }
+}
+
+object BigDecimalSerializer : NumberLiteralSerializer<BigDecimal>("java.math.BigDecimal", ::BigDecimal)
+
+object BigIntegerSerializer : NumberLiteralSerializer<BigInteger>("java.math.BigInteger", ::BigInteger)
+
+object InstantSerializer : StringRepresentationSerializer<Instant>("java.time.Instant", Instant::toString, Instant::parse)
+
+object LocalDateSerializer : StringRepresentationSerializer<LocalDate>(
+    "java.time.LocalDate",
+    DateTimeFormatter.ISO_LOCAL_DATE::format,
+    { LocalDate.parse(it, DateTimeFormatter.ISO_LOCAL_DATE) }
+)
+
+object LocalDateTimeSerializer : StringRepresentationSerializer<LocalDateTime>(
+    "java.time.LocalDateTime",
+    DateTimeFormatter.ISO_LOCAL_DATE_TIME::format,
+    { LocalDateTime.parse(it, DateTimeFormatter.ISO_LOCAL_DATE_TIME) }
+)
+
+object LocalTimeSerializer : StringRepresentationSerializer<LocalTime>(
+    "java.time.LocalTime",
+    DateTimeFormatter.ISO_LOCAL_TIME::format,
+    { LocalTime.parse(it, DateTimeFormatter.ISO_LOCAL_TIME) }
+)
+
+object OffsetDateTimeSerializer : StringRepresentationSerializer<OffsetDateTime>(
+    "java.time.OffsetDateTime",
+    DateTimeFormatter.ISO_OFFSET_DATE_TIME::format,
+    { OffsetDateTime.parse(it, DateTimeFormatter.ISO_OFFSET_DATE_TIME) }
+)
+
+object URISerializer : StringRepresentationSerializer<URI>("java.net.URI", URI::toString, URI::create)
+
+object URLSerializer : StringRepresentationSerializer<URL>("java.net.URL", URL::toString, { URI.create(it).toURL() })
+
+object UUIDSerializer : StringRepresentationSerializer<UUID>("java.util.UUID", UUID::toString, UUID::fromString)

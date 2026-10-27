@@ -8,6 +8,16 @@
 {{/optionalVars}}
  */{{#discriminator}}
 {{>typeInfoAnnotation}}{{/discriminator}}
+{{#kotlinx_serialization}}
+@Serializable
+{{#vendorExtensions.x-kotlinx-serial-name}}
+@SerialName("{{#lambdaEscapeInNormalString}}{{{.}}}{{/lambdaEscapeInNormalString}}")
+{{/vendorExtensions.x-kotlinx-serial-name}}
+{{#discriminator}}
+@OptIn(ExperimentalSerializationApi::class)
+@JsonClassDiscriminator("{{#lambdaEscapeInNormalString}}{{{propertyBaseName}}}{{/lambdaEscapeInNormalString}}")
+{{/discriminator}}
+{{/kotlinx_serialization}}
 {{#additionalModelTypeAnnotations}}
     {{{.}}}
 {{/additionalModelTypeAnnotations}}
@@ -75,13 +85,16 @@
     * {{{description}}}
     * Values: {{#allowableValues}}{{#enumVars}}{{&name}}{{^-last}},{{/-last}}{{/enumVars}}{{/allowableValues}}
     */
-    enum class {{{nameInPascalCase}}}(@get:JsonValue {{#useEnumValueInterface}}{{^isContainer}}override {{/isContainer}}{{/useEnumValueInterface}}val value: {{#isContainer}}{{#items}}{{{dataType}}}{{/items}}{{/isContainer}}{{^isContainer}}{{{dataType}}}{{/isContainer}}) {{#vendorExtensions.x-kotlin-implements}}{{#-first}}: {{{.}}}{{/-first}}{{^-first}}, {{{.}}}{{/-first}} {{/vendorExtensions.x-kotlin-implements}}{
+    {{#kotlinx_serialization}}
+    @Serializable(with = {{{nameInPascalCase}}}.Serializer::class)
+    {{/kotlinx_serialization}}
+    enum class {{{nameInPascalCase}}}({{#jackson}}@get:JsonValue {{/jackson}}{{#useEnumValueInterface}}{{^isContainer}}override {{/isContainer}}{{/useEnumValueInterface}}val value: {{#isContainer}}{{#items}}{{{dataType}}}{{/items}}{{/isContainer}}{{^isContainer}}{{{dataType}}}{{/isContainer}}) {{#vendorExtensions.x-kotlin-implements}}{{#-first}}: {{{.}}}{{/-first}}{{^-first}}, {{{.}}}{{/-first}} {{/vendorExtensions.x-kotlin-implements}}{
 
     {{#allowableValues}}{{#enumVars}}    {{&name}}({{{value}}}){{^-last}},{{/-last}}{{#-last}};{{/-last}}
     {{/enumVars}}{{/allowableValues}}
         companion object {
-            @JvmStatic
-            @JsonCreator
+            @JvmStatic{{#jackson}}
+            @JsonCreator{{/jackson}}
             fun forValue(value: {{#isContainer}}{{#items}}{{{dataType}}}{{/items}}{{/isContainer}}{{^isContainer}}{{{dataType}}}{{/isContainer}}): {{{nameInPascalCase}}} {
                 return values().firstOrNull{ it.value == value }
             {{#enumUnknownDefaultCase}}
@@ -98,6 +111,15 @@
             {{/enumUnknownDefaultCase}}
             }
         }
+        {{#kotlinx_serialization}}
+
+        object Serializer : EnumValueSerializer<{{{nameInPascalCase}}}, {{#isContainer}}{{#items}}{{{dataType}}}{{/items}}{{/isContainer}}{{^isContainer}}{{{dataType}}}{{/isContainer}}>(
+            "{{package}}.{{classname}}.{{nameInPascalCase}}",
+            {{#isContainer}}{{#items}}{{>kotlinxEnumValueSerializer}}{{/items}}{{/isContainer}}{{^isContainer}}{{>kotlinxEnumValueSerializer}}{{/isContainer}},
+            { it.value },
+            { {{{nameInPascalCase}}}.forValue(it) }
+        )
+        {{/kotlinx_serialization}}
     }
 {{/isEnum}}{{/vars}}{{/hasEnums}}
 {{#serializableModel}}

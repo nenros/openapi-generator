@@ -69,7 +69,8 @@
                 <version>${kotlin.version}</version>
                 <configuration>
                     <compilerPlugins>
-                        <plugin>spring</plugin>
+                        <plugin>spring</plugin>{{#kotlinx_serialization}}
+                        <plugin>kotlinx-serialization</plugin>{{/kotlinx_serialization}}
                     </compilerPlugins>
                     <jvmTarget>17</jvmTarget>
                 </configuration>
@@ -94,7 +95,12 @@
                         <groupId>org.jetbrains.kotlin</groupId>
                         <artifactId>kotlin-maven-allopen</artifactId>
                         <version>${kotlin.version}</version>
-                    </dependency>
+                    </dependency>{{#kotlinx_serialization}}
+                    <dependency>
+                        <groupId>org.jetbrains.kotlin</groupId>
+                        <artifactId>kotlin-maven-serialization</artifactId>
+                        <version>${kotlin.version}</version>
+                    </dependency>{{/kotlinx_serialization}}
                 </dependencies>
             </plugin>
         </plugins>
@@ -109,7 +115,11 @@
             <groupId>org.jetbrains.kotlin</groupId>
             <artifactId>kotlin-reflect</artifactId>
             <version>${kotlin.version}</version>
-        </dependency>{{^reactive}}
+        </dependency>{{#kotlinx_serialization}}
+        <dependency>
+            <groupId>org.jetbrains.kotlinx</groupId>
+            <artifactId>kotlinx-serialization-json</artifactId>
+        </dependency>{{/kotlinx_serialization}}{{^reactive}}
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

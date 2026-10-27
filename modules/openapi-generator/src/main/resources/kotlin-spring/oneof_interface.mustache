@@ -11,7 +11,11 @@
     JsonSubTypes.Type(value = {{classname}}::class){{^-last}},{{/-last}}
   {{/interfaceModels}}
 )
-{{/jackson}}{{/useDeductionForOneOfInterfaces}}{{/discriminator}}{{#additionalModelTypeAnnotations}}
+{{/jackson}}{{/useDeductionForOneOfInterfaces}}{{/discriminator}}{{#kotlinx_serialization}}{{#discriminator}}
+@Serializable
+@OptIn(ExperimentalSerializationApi::class)
+@JsonClassDiscriminator("{{#lambdaEscapeInNormalString}}{{{propertyBaseName}}}{{/lambdaEscapeInNormalString}}")
+{{/discriminator}}{{/kotlinx_serialization}}{{#additionalModelTypeAnnotations}}
 {{{.}}}
 {{/additionalModelTypeAnnotations}}
 {{#vendorExtensions.x-class-extra-annotation}}

@@ -1,6 +1,30 @@
+{{#kotlinx_serialization}}
+@file:UseSerializers(
+    BigDecimalSerializer::class,
+    BigIntegerSerializer::class,
+    InstantSerializer::class,
+    LocalDateSerializer::class,
+    LocalDateTimeSerializer::class,
+    LocalTimeSerializer::class,
+    OffsetDateTimeSerializer::class,
+    URISerializer::class,
+    URLSerializer::class,
+    UUIDSerializer::class,
+)
+
+{{/kotlinx_serialization}}
 package {{package}}
 
 import java.util.Objects
+{{#kotlinx_serialization}}
+import kotlinx.serialization.ExperimentalSerializationApi
+import kotlinx.serialization.KSerializer
+import kotlinx.serialization.SerialName
+import kotlinx.serialization.Serializable
+import kotlinx.serialization.UseSerializers
+import kotlinx.serialization.json.JsonClassDiscriminator
+import kotlinx.serialization.serializer
+{{/kotlinx_serialization}}
 {{#imports}}import {{import}}
 {{/imports}}
 {{#useBeanValidation}}

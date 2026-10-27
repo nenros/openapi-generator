@@ -1,0 +1,44 @@
+package {{basePackage}}
+
+import kotlinx.serialization.json.Json
+import org.springframework.context.annotation.Bean
+import org.springframework.context.annotation.Configuration
+{{#reactive}}
+import org.springframework.http.codec.ServerCodecConfigurer
+import org.springframework.http.codec.json.KotlinSerializationJsonDecoder
+import org.springframework.http.codec.json.KotlinSerializationJsonEncoder
+import org.springframework.web.reactive.config.WebFluxConfigurer
+{{/reactive}}
+{{^reactive}}
+import org.springframework.http.converter.json.KotlinSerializationJsonHttpMessageConverter
+{{/reactive}}
+
+/**
+ * Makes Spring use kotlinx.serialization (instead of Jackson) for the `@Serializable` models.
+ */
+@Configuration
+class KotlinxSerializationConfiguration {
+
+    @Bean(name = ["{{basePackage}}.KotlinxSerializationConfiguration.kotlinxJson"])
+    fun kotlinxJson(): Json = Json {
+        // align with the defaults of the Jackson ObjectMapper configured by Spring Boot
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
+{{^reactive}}
+
+    @Bean(name = ["{{basePackage}}.KotlinxSerializationConfiguration.kotlinSerializationJsonHttpMessageConverter"])
+    fun kotlinSerializationJsonHttpMessageConverter(json: Json): KotlinSerializationJsonHttpMessageConverter =
+        KotlinSerializationJsonHttpMessageConverter(json)
+{{/reactive}}
+{{#reactive}}
+
+    @Bean(name = ["{{basePackage}}.KotlinxSerializationConfiguration.kotlinSerializationWebFluxConfigurer"])
+    fun kotlinSerializationWebFluxConfigurer(json: Json): WebFluxConfigurer = object : WebFluxConfigurer {
+        override fun configureHttpMessageCodecs(configurer: ServerCodecConfigurer) {
+            configurer.defaultCodecs().kotlinSerializationJsonDecoder(KotlinSerializationJsonDecoder(json))
+            configurer.defaultCodecs().kotlinSerializationJsonEncoder(KotlinSerializationJsonEncoder(json))
+        }
+    }
+{{/reactive}}
+}

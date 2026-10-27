@@ -8353,4 +8353,136 @@ public class KotlinSpringServerCodegenTest {
         // oneOf parent uses oneof_interface.mustache, not dataClass.mustache — flag has no effect on it
         assertFileContains(Paths.get(outputPath + "/Animal.kt"), "sealed interface Animal");
     }
+
+    // ========== KOTLINX SERIALIZATION TESTS ==========
+
+    private static final String KOTLINX_SPEC = "src/test/resources/3_0/kotlin/kotlinx-serialization.yaml";
+
+    private Map<String, File> generateKotlinx(Map<String, Object> extraProperties) throws IOException {
+        Map<String, Object> props = new HashMap<>();
+        props.put(CodegenConstants.SERIALIZATION_LIBRARY, "kotlinx_serialization");
+        props.put(KotlinSpringServerCodegen.USE_SPRING_BOOT3, true);
+        props.putAll(extraProperties);
+        return generateFromContract(KOTLINX_SPEC, props);
+    }
+
+    @Test
+    public void kotlinxSerializationModels() throws IOException {
+        Map<String, File> files = generateKotlinx(Map.of());
+
+        Path thing = files.get("Thing.kt").toPath();
+        assertFileContains(thing,
+                "@file:UseSerializers(",
+                "UUIDSerializer::class,",
+                "@Serializable\ndata class Thing(",
+                "@SerialName(\"created_at\") val createdAt: java.time.OffsetDateTime,",
+                "@SerialName(\"\\$special\") val dollarSpecial: kotlin.String? = null",
+                "val free: kotlinx.serialization.json.JsonElement? = null",
+                "@Serializable(with = Status.Serializer::class)",
+                "object Serializer : EnumValueSerializer<Status, kotlin.String>(");
+        assertFileNotContains(thing, "JsonProperty", "JsonValue", "JsonCreator", "com.fasterxml");
+
+        Path level = files.get("Level.kt").toPath();
+        assertFileContains(level,
+                "@Serializable(with = Level.Serializer::class)",
+                "object Serializer : EnumValueSerializer<Level, kotlin.Int>(",
+                "serializer<kotlin.Int>()");
+        assertFileNotContains(level, "JsonValue", "JsonCreator");
+
+        assertFileContains(files.get("Serializers.kt").toPath(),
+                "package org.openapitools.model",
+                "object OffsetDateTimeSerializer",
+                "object BigDecimalSerializer",
+                "abstract class EnumValueSerializer");
+        assertFileContains(files.get("KotlinxSerializationConfiguration.kt").toPath(),
+                "fun kotlinxJson(): Json = Json {",
+                "KotlinSerializationJsonHttpMessageConverter(json)");
+        assertFileContains(files.get("pom.xml").toPath(),
+                "<plugin>kotlinx-serialization</plugin>",
+                "<artifactId>kotlin-maven-serialization</artifactId>",
+                "<artifactId>kotlinx-serialization-json</artifactId>");
+    }
+
+    @Test
+    public void kotlinxSerializationDiscriminators() throws IOException {
+        Map<String, File> files = generateKotlinx(Map.of());
+
+        // allOf with discriminator
+        assertFileContains(files.get("Pet.kt").toPath(),
+                "@Serializable\n@OptIn(ExperimentalSerializationApi::class)\n@JsonClassDiscriminator(\"petType\")\nsealed interface Pet");
+        assertFileContains(files.get("Dog.kt").toPath(),
+                "@Serializable\n@SerialName(\"dog\")\ndata class Dog(",
+                "@kotlinx.serialization.Transient override val petType: kotlin.String = \"dog\",");
+        // oneOf with discriminator
+        assertFileContains(files.get("Shape.kt").toPath(),
+                "@JsonClassDiscriminator(\"kind\")\nsealed interface Shape");
+        assertFileContains(files.get("Circle.kt").toPath(),
+                "@SerialName(\"circle\")\ndata class Circle(",
+                "@kotlinx.serialization.Transient override val kind: kotlin.String = \"circle\",");
+        assertFileNotContains(files.get("Circle.kt").toPath(), "@SerialName(\"kind\")");
+    }
+
+    @Test
+    public void kotlinxSerializationReactiveConfiguration() throws IOException {
+        Map<String, File> files = generateKotlinx(Map.of(KotlinSpringServerCodegen.REACTIVE, true,
+                KotlinSpringServerCodegen.GRADLE_BUILD_FILE, true));
+
+        assertFileContains(files.get("KotlinxSerializationConfiguration.kt").toPath(),
+                "configurer.defaultCodecs().kotlinSerializationJsonDecoder(KotlinSerializationJsonDecoder(json))",
+                "configurer.defaultCodecs().kotlinSerializationJsonEncoder(KotlinSerializationJsonEncoder(json))");
+        assertFileNotContains(files.get("KotlinxSerializationConfiguration.kt").toPath(),
+                "KotlinSerializationJsonHttpMessageConverter");
+        assertFileContains(files.get("build.gradle.kts").toPath(),
+                "id(\"org.jetbrains.kotlin.plugin.serialization\") version kotlinVersion",
+                "implementation(\"org.jetbrains.kotlinx:kotlinx-serialization-json\")");
+    }
+
+    @Test
+    public void kotlinxSerializationIgnoresOpenApiNullable() throws IOException {
+        Map<String, File> files = generateKotlinx(Map.of(CodegenConstants.OPENAPI_NULLABLE, true,
+                KotlinSpringServerCodegen.USE_SPRING_BOOT3, false, KotlinSpringServerCodegen.USE_SPRING_BOOT4, true));
+
+        assertFileContains(files.get("Thing.kt").toPath(), "val nullableField: kotlin.String? = null");
+        assertFileNotContains(files.get("Thing.kt").toPath(), "JsonNullable");
+        assertFileNotContains(files.get("Application.kt").toPath(), "JsonNullableModule");
+    }
+
+    @Test
+    public void jacksonIsTheDefaultSerializationLibrary() throws IOException {
+        Map<String, File> files = generateFromContract(KOTLINX_SPEC, Map.of(KotlinSpringServerCodegen.USE_SPRING_BOOT3, true));
+
+        assertFileContains(files.get("Thing.kt").toPath(), "@get:JsonProperty(\"created_at\", required = true)");
+        assertFileNotContains(files.get("Thing.kt").toPath(), "kotlinx.serialization", "@SerialName");
+        Assert.assertFalse(files.containsKey("Serializers.kt"));
+        Assert.assertFalse(files.containsKey("KotlinxSerializationConfiguration.kt"));
+    }
+
+    @Test
+    public void kotlinxSerializationRequiresSpringBoot3Or4() {
+        Throwable thrown = Assert.expectThrows(Throwable.class,
+                () -> generateKotlinx(Map.of(KotlinSpringServerCodegen.USE_SPRING_BOOT3, false)));
+        Assert.assertTrue(causeMessages(thrown).contains("requires `useSpringBoot3` or `useSpringBoot4`"));
+    }
+
+    @Test
+    public void kotlinxSerializationRejectsSealedResponseInterfaces() {
+        Throwable thrown = Assert.expectThrows(Throwable.class,
+                () -> generateKotlinx(Map.of(KotlinSpringServerCodegen.USE_SEALED_RESPONSE_INTERFACES, true)));
+        Assert.assertTrue(causeMessages(thrown).contains("useSealedResponseInterfaces"));
+    }
+
+    @Test
+    public void kotlinxSerializationRejectsUnknownLibrary() {
+        Throwable thrown = Assert.expectThrows(Throwable.class,
+                () -> generateKotlinx(Map.of(CodegenConstants.SERIALIZATION_LIBRARY, "gson")));
+        Assert.assertTrue(causeMessages(thrown).contains("Unsupported serializationLibrary 'gson'"));
+    }
+
+    private static String causeMessages(Throwable thrown) {
+        StringBuilder messages = new StringBuilder();
+        for (Throwable cause = thrown; cause != null; cause = cause.getCause()) {
+            messages.append(cause.getMessage()).append('\n');
+        }
+        return messages.toString();
+    }
 }
